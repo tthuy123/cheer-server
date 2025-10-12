@@ -5,7 +5,7 @@ const SECRET_KEY = process.env.TOKEN_SECRET_KEY;
 
 const tokenMiddleware = {
     authenticateToken: (req, res, next) => {
-        const token = req.headers.token;
+        const token = req.headers.authorization;
         if (!token) {
             console.log("No token provided.");
             return res.status(401).send({ auth: false, message: 'No token provided.' });
@@ -18,7 +18,7 @@ const tokenMiddleware = {
                 }
                 return res.status(401).send({ auth: false, message: 'Failed to authenticate token.' });
             }
-            console.log(user + " is authenticated.");
+            // console.log(user + " is authenticated.");
             req.user = user;
             next();
         });
