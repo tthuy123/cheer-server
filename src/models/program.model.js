@@ -1,82 +1,214 @@
+// models/ProgramModel.js
 import pool from '../config/db.connect.js';
-import { v4 as uuidv4 } from 'uuid';
+
+const TABLE = 'programs';
+const notDeleted = 'IFNULL(is_deleted,0)=0';
+
+// helper: build SET clause only for provided fields
+function buildUpdateSet(data) {
+  const allowed = ['name','type','training_type','started_at','finished_at','copied_from'];
+  const fields = [];
+  const params = [];
+  for (const k of allowed) {
+    if (Object.prototype.hasOwnProperty.call(data, k)) {
+      fields.push(`${k} = ?`);
+      params.push(data[k] ?? null); // allow nulls
+    }
+  }
+  // always bump updated_at
+  fields.push('updated_at = NOW()');
+  return { setClause: fields.join(', '), params };
+}
 
 const ProgramModel = {
-    listAllProgramsOfUser: async (userId, callback) => {
-        try {
-            const query = `
-        SELECT p.program_id, p.name, p.type, p.created_at, p.updated_at
-        FROM programs p
-        JOIN users ON p.created_by  = users.user_id
-        WHERE users.user_id = ?`;
-            const [rows] = await pool.query(query, [userId]);
-            callback(null, rows);
-        } catch (error) {
-            console.error('Error fetching programs:', error);
-            callback('An error occurred while fetching programs');
-        }
-    },
-    
-    createProgram: async (userId, programData, callback) => {
-        try {
-            const programId = uuidv4();
-            const query = `
-                INSERT INTO programs (program_id, name, description, created_at, updated_at)
-                VALUES (?, ?, ?, NOW(), NOW())`;
-            await pool.query(query, [programId, programData.name, programData.description]);
-            const userProgramQuery = `
-                INSERT INTO user_programs (user_id, program_id)
-                VALUES (?, ?)`;
-            await pool.query(userProgramQuery, [userId, programId]);
-            callback(null, { program_id: programId, ...programData });
-        } catch (error) {
-            console.error('Error creating program:', error);
-            callback('An error occurred while creating the program');
-        }
-    },
-    getProgramById: async (programId, callback) => {
-        try {
-            const query = `SELECT * FROM programs WHERE program_id = ?`;
-            const [rows] = await pool.query(query, [programId]);
-            if (rows.length === 0) {
-                return callback('Program not found');
-            }
-            callback(null, rows[0]);
-        } catch (error) {
-            console.error('Error fetching program:', error);
-            callback('An error occurred while fetching the program');
-        }
-    },
-    updateProgram: async (programId, programData, callback) => {
-        try {
-            const query = `
-                UPDATE programs
-                SET name = ?, description = ?, updated_at = NOW()
-                WHERE program_id = ?`;
-            const [result] = await pool.query(query, [programData.name, programData.description, programId]);
-            if (result.affectedRows === 0) {
-                return callback('Program not found or no changes made');
-            }
-            callback(null, { message: 'Program updated successfully' });
-        } catch (error) {
-            console.error('Error updating program:', error);
-            callback('An error occurred while updating the program');
-        }
-    },
-    deleteProgram: async (programId, callback) => {
-        try {
-            await pool.query(deleteUserProgramsQuery, [programId]);
-            const deleteProgramQuery = `DELETE FROM programs WHERE program_id = ?`;
-            const [result] = await pool.query(deleteProgramQuery, [programId]);
-            if (result.affectedRows === 0) {
-                return callback('Program not found');
-            }
-            callback(null, { message: 'Program deleted successfully' });
-        } catch (error) {
-            console.error('Error deleting program:', error);
-            callback('An error occurred while deleting the program');
-        }
+  // 1) List all programs created by a user (not deleted)
+  listAllProgramsOfUser: async (userId, callback) => {
+  try {
+    // 1) DB hiện tại & tổng số bản ghi trong bảng
+    const [dbg1] = await pool.query('SELECT DATABASE() AS db');
+    const [dbg2] = await pool.query('SELECT COUNT(*) AS total FROM programs');
+    console.log('DB using:', dbg1[0].db, ' | programs.count =', dbg2[0].total);
+
+    // 2) In trước khi lọc theo userId
+    const [allRows] = await pool.query(
+      'SELECT program_id, name, created_by, IFNULL(is_deleted,0) is_deleted FROM programs ORDER BY program_id DESC LIMIT 5'
+    );
+    console.log('Sample rows:', allRows);
+
+    // 3) Truy vấn đúng theo userId (đơn giản nhất trước)
+    const sql = `
+      SELECT p.program_id, p.name, p.type, p.training_type,
+             p.started_at, p.finished_at, p.created_at, p.updated_at
+      FROM programs AS p
+      WHERE BINARY p.created_by = BINARY CAST(? AS CHAR(36))
+      ORDER BY p.created_at DESC
+    `;
+    const [rows] = await pool.query(sql, [userId]);
+    console.log('Rows for userId:', userId, '=>', rows.length);
+
+    callback(null, rows);
+  } catch (err) {
+    console.error('Error fetching programs:', err);
+    callback('An error occurred while fetching programs');
+  }
+},
+
+  // 2) Create program — CAREFUL: use AUTO_INCREMENT, set created_by
+  // programData may include: name, type, training_type, started_at, finished_at, copied_from
+  createProgram: async (userId, programData, callback) => {
+    try {
+      const {
+        name = null,
+        type = null,
+        training_type = null,
+        started_at = null,
+        finished_at = null,
+        copied_from = null
+      } = programData ?? {};
+
+      const sql = `
+        INSERT INTO ${TABLE}
+          (name, type, training_type, started_at, finished_at,
+           created_at, updated_at, created_by, copied_from, is_deleted)
+        VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, 0)
+      `;
+      const params = [
+        name, type, training_type, started_at, finished_at,
+        userId, copied_from
+      ];
+      const [result] = await pool.query(sql, params);
+
+      // MySQL AUTO_INCREMENT id:
+      const program_id = result.insertId;
+
+      callback(null, {
+        program_id,
+        name, type, training_type, started_at, finished_at, copied_from,
+        created_by: userId
+      });
+    } catch (err) {
+      console.error('Error creating program:', err);
+      callback('An error occurred while creating the program');
     }
+  },
+
+  // 3) Get program by id (scoped to owner)
+  getProgramByIdForUser: async (userId, programId, callback) => {
+    try {
+      const sql = `SELECT * FROM ${TABLE}
+                   WHERE program_id = ? AND created_by = ? AND ${notDeleted}`;
+      const [rows] = await pool.query(sql, [programId, userId]);
+      if (rows.length === 0) return callback('Program not found');
+      callback(null, rows[0]);
+    } catch (err) {
+      console.error('Error fetching program:', err);
+      callback('An error occurred while fetching the program');
+    }
+  },
+
+  // 4) Update (only provided fields). Owner-scoped.
+  updateProgramForUser: async (userId, programId, programData, callback) => {
+    try {
+      const { setClause, params } = buildUpdateSet(programData || {});
+      if (params.length === 1 && setClause === 'updated_at = NOW()') {
+        return callback('No fields to update');
+      }
+      const sql = `UPDATE ${TABLE}
+                   SET ${setClause}
+                   WHERE program_id = ? AND created_by = ? AND ${notDeleted}`;
+      const [res] = await pool.query(sql, [...params, programId, userId]);
+      if (res.affectedRows === 0) return callback('Program not found or no changes made');
+      callback(null, { message: 'Program updated successfully' });
+    } catch (err) {
+      console.error('Error updating program:', err);
+      callback('An error occurred while updating the program');
+    }
+  },
+
+  // 5) Delete — soft delete by default (set is_deleted = 1)
+  deleteProgramForUser: async (userId, programId, callback, { hard = false } = {}) => {
+    try {
+      if (hard) {
+        const sql = `DELETE FROM ${TABLE} WHERE program_id = ? AND created_by = ?`;
+        const [res] = await pool.query(sql, [programId, userId]);
+        if (res.affectedRows === 0) return callback('Program not found');
+        return callback(null, { message: 'Program permanently deleted' });
+      }
+      const sql = `UPDATE ${TABLE}
+                   SET is_deleted = 1, updated_at = NOW()
+                   WHERE program_id = ? AND created_by = ? AND ${notDeleted}`;
+      const [res] = await pool.query(sql, [programId, userId]);
+      if (res.affectedRows === 0) return callback('Program not found');
+      callback(null, { message: 'Program deleted successfully' });
+    } catch (err) {
+      console.error('Error deleting program:', err);
+      callback('An error occurred while deleting the program');
+    }
+  },
+  createProgramWithExercises: async (userId, programData, exercises = [], callback) => {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // 1️⃣ Insert vào bảng programs
+      const insertProgramSQL = `
+        INSERT INTO ${TABLE}
+          (name, type, training_type, started_at, finished_at,
+           created_at, updated_at, created_by, copied_from, is_deleted)
+        VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, 0)
+      `;
+
+      const programParams = [
+        programData.name || null,
+        programData.type || null,
+        programData.training_type || null,
+        programData.started_at || null,
+        programData.finished_at || null,
+        userId,
+        programData.copied_from || null,
+      ];
+
+      const [programResult] = await conn.query(insertProgramSQL, programParams);
+      const program_id = programResult.insertId;
+
+      // 2️⃣ Nếu có danh sách exercises
+      for (const ex of exercises) {
+        const insertProgramExerciseSQL = `
+          INSERT INTO program_exercises
+            (type, sets, status, created_at, updated_at, program_id, exercise_id, is_deleted)
+          VALUES (?, ?, ?, NOW(), NOW(), ?, ?, 0)
+        `;
+
+        const params = [
+          ex.type || null,
+          JSON.stringify(ex.sets || null),
+          ex.status || 0,
+          program_id,
+          ex.exercise_id || null,
+        ];
+
+        await conn.query(insertProgramExerciseSQL, params);
+      }
+
+      await conn.commit();
+
+      callback(null, {
+        program_id,
+        name: programData.name,
+        type: programData.type,
+        training_type: programData.training_type,
+        created_by: userId,
+        total_exercises: exercises.length,
+      });
+    } catch (err) {
+      await conn.rollback();
+      console.error("❌ Error creating program with exercises:", err);
+      callback("An error occurred while creating the program and exercises");
+    } finally {
+      conn.release();
+    }
+  },
+
 };
 
 export default ProgramModel;

@@ -1,15 +1,17 @@
-import ProgramController from "../controllers/ProgramController.js";
+// src/routes/program.route.js
 import express from "express";
+import ProgramController from "../controllers/ProgramController.js";
+import tokenMiddleware from '../middlewares/token.middleware.js';
 
 const router = express.Router();
 const programController = new ProgramController();
-import tokenMiddleware from '../middlewares/token.middleware.js';
 
+router.use(tokenMiddleware.authenticateToken);
 
-router.get('/:userId', tokenMiddleware.authenticateToken, programController.listAllProgramsOfUser);
-router.post('/:userId', tokenMiddleware.authenticateToken, programController.createProgram);
-router.get('/:programId', tokenMiddleware.authenticateToken, programController.getProgramById);
-router.put('/:programId', tokenMiddleware.authenticateToken, programController.updateProgram);
-router.delete('/:programId', tokenMiddleware.authenticateToken, programController.deleteProgram);
+router.get('/users/:userId', programController.listAllProgramsOfUser);
+router.post('/users/:userId', programController.createProgramWithExercises);
+router.get('/users/:userId/:programId', programController.getProgramById);
+router.patch('/users/:userId/:programId', programController.updateProgram);
+router.delete('/users/:userId/:programId', programController.deleteProgram);
 
 export default router;
