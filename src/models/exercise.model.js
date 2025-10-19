@@ -91,29 +91,32 @@ const ExerciseModel = {
 
   // GET /exercises/search?name=...
   searchExercisesByName: async (name, callback) => {
-    try {
-      const term = escapeLike(String(name ?? '').trim());
-      const sql = `
-        SELECT 
-          e.exercise_id,
-          e.name,
-          e.description,
-          e.cues,
-          e.video_url,
-          e.image_url,
-          e.created_at,
-          e.updated_at
-        FROM exercises e
-        WHERE e.name LIKE ? ESCAPE '\\'
-        ORDER BY e.updated_at DESC, e.exercise_id DESC
-      `;
-      const [rows] = await pool.query(sql, [`%${term}%`]);
-      callback(null, rows);
-    } catch (error) {
-      console.error('Error searching exercises:', error);
-      callback('An error occurred while searching exercises');
-    }
-  },
+  try {
+    const term = String(name ?? '').trim();
+    if (!term) return callback('Query param "name" is required');
+
+    const sql = `
+      SELECT 
+        e.exercise_id,
+        e.name,
+        e.description,
+        e.cues,
+        e.video_url,
+        e.image_url,
+        e.created_at,
+        e.updated_at
+      FROM exercises e
+      WHERE e.name LIKE CONCAT('%', ?, '%')
+      ORDER BY e.updated_at DESC, e.exercise_id DESC
+    `;
+    const [rows] = await pool.query(sql, [term]);
+    callback(null, rows);
+  } catch (error) {
+    console.error('Error searching exercises:', error);
+    callback('An error occurred while searching exercises');
+  }
+},
+
 
   // GET /exercises/:id
   getExerciseById: async (id, callback) => {

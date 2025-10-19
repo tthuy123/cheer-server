@@ -22,28 +22,72 @@ function buildUpdateSet(data) {
 
 const ProgramModel = {
   // 1) List all programs created by a user (not deleted)
-  listAllProgramsOfUser: async (userId, callback) => {
+ // models/program.model.js
+listAllProgramsOfUser: async (userId, type, callback) => {
   try {
-    // 1) DB hiện tại & tổng số bản ghi trong bảng
+    // debug (tùy chọn)
     const [dbg1] = await pool.query('SELECT DATABASE() AS db');
     const [dbg2] = await pool.query('SELECT COUNT(*) AS total FROM programs');
     console.log('DB using:', dbg1[0].db, ' | programs.count =', dbg2[0].total);
 
-    // 2) In trước khi lọc theo userId
-    const [allRows] = await pool.query(
-      'SELECT program_id, name, created_by, IFNULL(is_deleted,0) is_deleted FROM programs ORDER BY program_id DESC LIMIT 5'
-    );
-    console.log('Sample rows:', allRows);
+    // Base SQL
+    let sql = `
+      SELECT
+        p.program_id,
+        p.name,
+        p.type,
+        p.training_type,
+        p.started_at,
+        p.finished_at,
+        p.created_at,
+        p.updated_at,
 
-    // 3) Truy vấn đúng theo userId (đơn giản nhất trước)
-    const sql = `
-      SELECT p.program_id, p.name, p.type, p.training_type,
-             p.started_at, p.finished_at, p.created_at, p.updated_at
+        -- Tên các bài tập (dạng chuỗi)
+        GROUP_CONCAT(DISTINCT e.name ORDER BY pe.program_exercise_id SEPARATOR ', ') AS exercise_names,
+
+        -- Danh sách bài tập (dạng JSON array, không null)
+        COALESCE(
+          JSON_ARRAYAGG(
+            IF(
+              e.exercise_id IS NULL, NULL,
+              JSON_OBJECT(
+                'program_exercise_id', pe.program_exercise_id,
+                'exercise_id',         e.exercise_id,
+                'name',                e.name,
+                'type',                pe.type,
+                'status',              pe.status,
+                'sets',                pe.sets
+              )
+            )
+          ),
+          JSON_ARRAY()
+        ) AS exercises
+
       FROM programs AS p
-      WHERE BINARY p.created_by = BINARY CAST(? AS CHAR(36))
+      LEFT JOIN program_exercises AS pe
+        ON pe.program_id = p.program_id
+       AND (pe.is_deleted = 0 OR pe.is_deleted IS NULL)
+      LEFT JOIN exercises AS e
+        ON e.exercise_id = pe.exercise_id
+
+      WHERE TRIM(p.created_by) = TRIM(?)
+        AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
+    `;
+
+    const params = [String(userId).trim()];
+
+    // Thêm điều kiện lọc theo type nếu có
+    if (type && type !== 'all') {
+      sql += ` AND p.type = ? `;
+      params.push(String(type));
+    }
+
+    sql += `
+      GROUP BY p.program_id
       ORDER BY p.created_at DESC
     `;
-    const [rows] = await pool.query(sql, [userId]);
+
+    const [rows] = await pool.query(sql, params);
     console.log('Rows for userId:', userId, '=>', rows.length);
 
     callback(null, rows);
@@ -52,6 +96,7 @@ const ProgramModel = {
     callback('An error occurred while fetching programs');
   }
 },
+
 
   // 2) Create program — CAREFUL: use AUTO_INCREMENT, set created_by
   // programData may include: name, type, training_type, started_at, finished_at, copied_from
@@ -208,6 +253,79 @@ const ProgramModel = {
       conn.release();
     }
   },
+  // models/program.model.js
+// notDeleted nên là: const notDeleted = '(p.is_deleted = 0 OR p.is_deleted IS NULL)';
+searchProgramsByNameForUser: async (userId, nameQuery, type, callback) => {
+  try {
+    const uid  = String(userId).trim();
+    const term = String(nameQuery ?? '').trim();
+    if (!term) return callback(null, []);
+
+    const notDeletedProg = '(p.is_deleted  = 0 OR p.is_deleted  IS NULL)';
+    const notDeletedPE   = '(pe.is_deleted = 0 OR pe.is_deleted IS NULL)';
+
+    let sql = `
+      SELECT
+        p.program_id,
+        p.name,
+        p.type,
+        p.training_type,
+        p.started_at,
+        p.finished_at,
+        p.created_at,
+        p.updated_at,
+
+        -- chuỗi tên bài tập
+        GROUP_CONCAT(DISTINCT e.name ORDER BY pe.program_exercise_id SEPARATOR ', ') AS exercise_names,
+
+        -- mảng JSON bài tập (không null)
+        COALESCE(
+          JSON_ARRAYAGG(
+            IF(
+              e.exercise_id IS NULL, NULL,
+              JSON_OBJECT(
+                'program_exercise_id', pe.program_exercise_id,
+                'exercise_id',         e.exercise_id,
+                'name',                e.name,
+                'type',                pe.type,
+                'status',              pe.status,
+                'sets',                pe.sets
+              )
+            )
+          ),
+          JSON_ARRAY()
+        ) AS exercises
+      FROM programs AS p
+      LEFT JOIN program_exercises AS pe
+        ON pe.program_id = p.program_id
+       AND ${notDeletedPE}
+      LEFT JOIN exercises AS e
+        ON e.exercise_id = pe.exercise_id
+      WHERE TRIM(p.created_by) = TRIM(?)
+        AND p.name LIKE CONCAT('%', ?, '%')
+        AND ${notDeletedProg}
+    `;
+
+    const params = [uid, term];
+
+    if (type && type !== 'all') {
+      sql += ` AND p.type = ? `;
+      params.push(String(type));
+    }
+
+    sql += `
+      GROUP BY p.program_id
+      ORDER BY p.created_at DESC
+    `;
+
+    const [rows] = await pool.query(sql, params);
+    return callback(null, rows);
+  } catch (err) {
+    console.error('Error searching programs:', err);
+    return callback('An error occurred while searching for programs');
+  }
+},
+
 
 };
 
