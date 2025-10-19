@@ -13,18 +13,20 @@ const pickProgramFields = (src = {}) => {
 
 class ProgramController {
   // GET /users/:userId/programs
+  // controllers/ProgramController.js
   async listAllProgramsOfUser(req, res) {
-    const { userId } = req.params;
-    console.log("✅ userId nhận từ route:", userId);
-    try {
-      ProgramModel.listAllProgramsOfUser(userId, (error, result) => {
-        if (error) return res.status(400).json({ error: toMsg(error) });
-        return res.status(200).json({ programs: result });
-      });
-    } catch (error) {
-      return res.status(500).json({ error: toMsg(error) });
-    }
+  const { userId } = req.params;
+  const { type } = req.query; // nhận type từ query
+  try {
+    ProgramModel.listAllProgramsOfUser(userId, type, (error, rows) => {
+      if (error) return res.status(500).json({ error: String(error) });
+      return res.status(200).json({ programs: rows });
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
+}
+
 
   // POST /users/:userId/programs
   async createProgram(req, res) {
@@ -102,6 +104,31 @@ class ProgramController {
       return res.status(500).json({ error: toMsg(error) });
     }
   }
+
+  // controllers/ProgramController.js
+async searchProgramsByNameForUser(req, res) {
+  const { userId } = req.params;
+  const { name, type } = req.query;
+
+  if (!String(name ?? '').trim()) {
+    return res.status(400).json({ error: "Query param 'name' is required" });
+  }
+
+  try {
+    ProgramModel.searchProgramsByNameForUser(
+      userId,
+      name,
+      type,                                   // mới thêm
+      (error, rows) => {
+        if (error) return res.status(500).json({ error: String(error) });
+        return res.status(200).json({ items: rows, q: name });
+      }
+    );
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
 }
 
 export default ProgramController;
