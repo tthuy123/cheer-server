@@ -16,4 +16,12 @@ router.get('/users/:userId/:programId', programController.getProgramById);
 router.patch('/users/:userId/:programId', programController.updateProgram);
 router.delete('/users/:userId/:programId', programController.deleteProgram);
 
+// GET /users/:userId/programs/:programId
+router.get('/users/:userId/programs/:programId', programController.getProgramDetailsById);
+router.post(
+  '/:programId/exercises/:programExerciseId/workouts',
+  // auth, // bật nếu dùng JWT
+  programController.saveWorkout
+);
+
 export default router;

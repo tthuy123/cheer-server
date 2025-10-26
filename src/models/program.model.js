@@ -325,6 +325,154 @@ searchProgramsByNameForUser: async (userId, nameQuery, type, callback) => {
     return callback('An error occurred while searching for programs');
   }
 },
+  getProgramDetailsById: async (userId, programId, callback) => {
+  try {
+    const sql = `
+      SELECT
+        p.program_id,
+        p.name,
+        p.type,
+        p.training_type,
+        p.started_at,
+        p.finished_at,
+        p.created_at,
+        p.updated_at,
+
+        COALESCE(
+          JSON_ARRAYAGG(
+            IF(
+              e.exercise_id IS NULL, NULL,
+              JSON_OBJECT(
+                'program_exercise_id', pe.program_exercise_id,
+                'exercise_id',         e.exercise_id,
+                'name',                e.name,
+                'type',                pe.type,
+                'status',              pe.status,
+                'sets',                pe.sets,
+                'exercise_meta', JSON_OBJECT(
+                  'description', e.description,
+                  'cues',        e.cues,
+                  'video_url',   e.video_url,
+                  'image_url',   e.image_url,
+                  'created_at',  e.created_at,
+                  'updated_at',  e.updated_at
+                ),
+                'past_workouts',
+                COALESCE((
+                  SELECT
+                    IFNULL(
+                      CONCAT(
+                        '[',
+                        GROUP_CONCAT(t.j ORDER BY t.created_at DESC SEPARATOR ','),
+                        ']'
+                      ),
+                      JSON_ARRAY()
+                    )
+                  FROM (
+                    SELECT
+                      JSON_OBJECT(
+                        'training_data_id', td.training_data_id,
+                        'created_at',       td.created_at,
+                        'updated_at',       td.updated_at,
+                        'note',             td.note,
+                        'sets',             td.sets
+                      ) AS j,
+                      td.created_at
+                    FROM training_data td
+                    WHERE td.program_exercise_id = pe.program_exercise_id
+                      AND td.exercise_id = e.exercise_id
+                      AND td.user_id = ?
+                  ) AS t
+                ), JSON_ARRAY())
+              )
+            )
+          ),
+          JSON_ARRAY()
+        ) AS exercises
+
+      FROM programs AS p
+      LEFT JOIN program_exercises AS pe
+        ON pe.program_id = p.program_id
+       AND (pe.is_deleted = 0 OR pe.is_deleted IS NULL)
+      LEFT JOIN exercises AS e
+        ON e.exercise_id = pe.exercise_id
+      WHERE p.program_id = ?
+        AND TRIM(p.created_by) = TRIM(?)
+        AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
+      GROUP BY p.program_id
+    `;
+
+    // Thứ tự tham số: (1) userId cho subquery lịch sử, (2) programId, (3) userId cho p.created_by
+    const [rows] = await pool.query(sql, [userId, programId, userId]);
+
+    if (rows.length === 0) return callback('Program not found');
+    callback(null, rows[0]);
+  } catch (err) {
+    console.error('Error fetching program details:', err);
+    callback('An error occurred while fetching program details');
+  }
+},
+
+createWorkoutForExercise: async ({
+    userId,
+    programId,
+    programExerciseId,
+    exerciseId,     // optional – nếu không truyền, sẽ tra từ program_exercises
+    note = '',
+    sets = [],
+  }) => {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // Lấy exercise_id nếu thiếu + đảm bảo program_exercise thuộc đúng program
+      let exId = exerciseId;
+      if (!exId) {
+        const [rows] = await conn.query(
+          `SELECT exercise_id
+             FROM program_exercises
+            WHERE program_exercise_id = ?
+              AND program_id = ?
+              AND (is_deleted = 0 OR is_deleted IS NULL)
+            LIMIT 1`,
+          [programExerciseId, programId]
+        );
+        if (!rows.length) {
+          throw new Error('Program exercise not found');
+        }
+        exId = rows[0].exercise_id;
+      }
+
+      // Lưu workout
+      const [result] = await conn.query(
+        `INSERT INTO training_data
+           (sets, note, created_at, updated_at, program_exercise_id, user_id, exercise_id)
+         VALUES
+           (CAST(? AS JSON), ?, NOW(), NOW(), ?, ?, ?)`,
+        [JSON.stringify(sets), note, programExerciseId, userId, exId]
+      );
+
+      const training_data_id = result.insertId;
+
+      // Lấy record vừa tạo (trả về cho FE)
+      const [saved] = await conn.query(
+        `SELECT training_data_id, sets, note, created_at, updated_at,
+                program_exercise_id, user_id, exercise_id
+           FROM training_data
+          WHERE training_data_id = ?`,
+        [training_data_id]
+      );
+
+      await conn.commit();
+      return saved[0];
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
+  },
+
 
 
 };
