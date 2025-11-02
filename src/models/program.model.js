@@ -379,8 +379,7 @@ searchProgramsByNameForUser: async (userId, nameQuery, type, callback) => {
                       ) AS j,
                       td.created_at
                     FROM training_data td
-                    WHERE td.program_exercise_id = pe.program_exercise_id
-                      AND td.exercise_id = e.exercise_id
+                    WHERE td.exercise_id = e.exercise_id
                       AND td.user_id = ?
                   ) AS t
                 ), JSON_ARRAY())
