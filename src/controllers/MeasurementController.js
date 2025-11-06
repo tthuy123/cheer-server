@@ -172,7 +172,7 @@ async getAthleteProgress(req, res) {
         // Mới nhất là phần tử đầu tiên (index 0)
         const latestEntry = history[0];
         // Cũ nhất (lần đầu tiên) là phần tử cuối cùng
-        const firstEntry = history[history.length - 1]; 
+        const firstEntry = history[1]; 
 
         // Giả định: 'result' là một con số (ví dụ: 5999).
         // 'Total Change' là sự chênh lệch giữa lần đầu và lần mới nhất.

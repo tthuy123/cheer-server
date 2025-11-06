@@ -102,7 +102,7 @@ const MeasurementModel = {
         SELECT
             ms.measurement_id,
             ms.athlete_id,
-            MIN(ms.result) AS best_result 
+            MAX(ms.result) AS best_result 
         FROM
             measurement_sessions AS ms
         JOIN
