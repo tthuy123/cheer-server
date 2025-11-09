@@ -177,7 +177,7 @@ async getAthleteProgress(req, res) {
         // Giả định: 'result' là một con số (ví dụ: 5999).
         // 'Total Change' là sự chênh lệch giữa lần đầu và lần mới nhất.
         // (Đối với thời gian, 'first' - 'latest' > 0 là tiến bộ)
-        const totalChange = firstEntry.result - latestEntry.result;
+        const totalChange = Math.abs(firstEntry.result - latestEntry.result);
 
         const summary = {
             latestResult: latestEntry.result,
