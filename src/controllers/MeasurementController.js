@@ -169,10 +169,11 @@ async getAthleteProgress(req, res) {
 
         // 3. Tính toán dữ liệu tóm tắt (summary)
         
-        // Mới nhất là phần tử đầu tiên (index 0)
         const latestEntry = history[0];
-        // Cũ nhất (lần đầu tiên) là phần tử cuối cùng
-        const firstEntry = history[1]; 
+        let firstEntry;
+        if (history.length > 1) {
+            firstEntry = history[1];
+        } else firstEntry = latestEntry;
 
         // Giả định: 'result' là một con số (ví dụ: 5999).
         // 'Total Change' là sự chênh lệch giữa lần đầu và lần mới nhất.

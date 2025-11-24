@@ -88,7 +88,7 @@ const CheckoffModel = {
         ON nc.checkoff_id = sc.checkoff_id
       LEFT JOIN user_profiles AS u
         ON u.profile_id = u1.profile_id
-      WHERE sc.coach_id = ?
+      WHERE sc.coach_id = ? AND sc.status_review_date IS NULL
       -- sắp xếp: bản đã nộp sớm nhất lên trước, các bản chưa nộp (NULL) xuống cuối
       ORDER BY 
         sc.submitted_date IS NULL ASC,    -- false(0)=đã nộp -> lên trước; true(1)=NULL -> xuống sau
