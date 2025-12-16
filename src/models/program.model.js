@@ -195,7 +195,7 @@ listAllProgramsOfUser: async (userId, type, callback) => {
     try {
       await conn.beginTransaction();
 
-      // 1️⃣ Insert vào bảng programs
+  // Insert vào bảng programs
       const insertProgramSQL = `
         INSERT INTO ${TABLE}
           (name, type, training_type, started_at, finished_at,
@@ -216,7 +216,7 @@ listAllProgramsOfUser: async (userId, type, callback) => {
       const [programResult] = await conn.query(insertProgramSQL, programParams);
       const program_id = programResult.insertId;
 
-      // 2️⃣ Nếu có danh sách exercises
+      // Nếu có danh sách exercises
       for (const ex of exercises) {
         const insertProgramExerciseSQL = `
           INSERT INTO program_exercises
@@ -247,14 +247,13 @@ listAllProgramsOfUser: async (userId, type, callback) => {
       });
     } catch (err) {
       await conn.rollback();
-      console.error("❌ Error creating program with exercises:", err);
+      console.error(" Error creating program with exercises:", err);
       callback("An error occurred while creating the program and exercises");
     } finally {
       conn.release();
     }
   },
-  // models/program.model.js
-// notDeleted nên là: const notDeleted = '(p.is_deleted = 0 OR p.is_deleted IS NULL)';
+
 searchProgramsByNameForUser: async (userId, nameQuery, type, callback) => {
   try {
     const uid  = String(userId).trim();
@@ -400,8 +399,7 @@ searchProgramsByNameForUser: async (userId, nameQuery, type, callback) => {
         AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
       GROUP BY p.program_id
     `;
-
-    // Thứ tự tham số: (1) userId cho subquery lịch sử, (2) programId, (3) userId cho p.created_by
+    await pool.query("SET SESSION group_concat_max_len = 100000");
     const [rows] = await pool.query(sql, [userId, programId, userId]);
 
     if (rows.length === 0) return callback('Program not found');
